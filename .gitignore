@@ -1,0 +1,8 @@
+# WorkBuddy workspace metadata
+.workbuddy/
+
+# Test screenshots
+*.png
+
+# System files
+.DS_Store
