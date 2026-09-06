@@ -209,6 +209,12 @@ const App = {
     const bar = document.getElementById('patient-switcher');
     if (!bar) return;
 
+    // “我的”页不显示切换入口（页面内已有所属信息，避免重复）
+    if (this.state.route === 'profile') {
+      bar.classList.add('hidden');
+      return;
+    }
+
     const patients = Store.getPatients();
     if (patients.length < 2) {
       bar.classList.add('hidden');
@@ -516,12 +522,6 @@ const App = {
           </div>
         </div>
 
-        <div class="record-visual" id="record-visual">
-          <div class="record-visual-inner" id="record-visual-inner">
-            ${this.icons.mic}
-          </div>
-        </div>
-
         <div class="waveform" id="waveform-container" style="display:none;">
           <div id="waveform-bars" style="display:flex;gap:3px;align-items:center;height:40px;"></div>
         </div>
@@ -577,9 +577,11 @@ const App = {
       const finishBtn = document.getElementById('finish-btn');
       const demoBtn = document.getElementById('demo-btn');
 
-      visual.classList.add('recording');
-      inner.classList.add('recording');
-      inner.innerHTML = this.icons.stop;
+      if (visual) visual.classList.add('recording');
+      if (inner) {
+        inner.classList.add('recording');
+        inner.innerHTML = this.icons.stop;
+      }
       btn.classList.add('recording');
       hint.textContent = '正在录音... 听清医生说的每句话';
       cancelBtn.style.display = 'flex';
@@ -693,7 +695,13 @@ const App = {
       <div class="detail-header">
         <div class="detail-header-top">
           <button class="back-btn" onclick="App.navigate('home')">${this.icons.chevronLeft}</button>
-          <button class="back-btn" onclick="App.shareVisit('${visit.id}')" style="margin-left:auto;">${this.icons.share}</button>
+          <div class="detail-header-actions">
+            <button class="back-btn detail-import-btn" onclick="App.uploadImage('${visit.id}')" title="导入病例">
+              ${this.icons.camera}
+              <span class="detail-import-label">导入病例</span>
+            </button>
+            <button class="back-btn" onclick="App.shareVisit('${visit.id}')" title="分享">${this.icons.share}</button>
+          </div>
         </div>
         <div class="detail-diagnosis">${this.escape(visit.diagnosis || '未记录诊断')}</div>
         <div class="detail-meta">

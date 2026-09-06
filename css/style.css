@@ -1614,6 +1614,28 @@ body {
   z-index: 1;
 }
 
+/* 详情页顶部右侧操作组（病例导入 + 分享） */
+.detail-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-import-btn {
+  width: auto;
+  border-radius: var(--radius-full);
+  padding: 0 14px;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.28);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detail-import-label {
+  white-space: nowrap;
+}
+
 /* --- Loading --- */
 .loading-dots {
   display: flex;
