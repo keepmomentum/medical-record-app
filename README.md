@@ -7,6 +7,18 @@
 
 ---
 
+## 📸 界面预览
+
+| 首页 · 樱粉温柔主题 | 首页 · 暖阳奶油主题 |
+|:---:|:---:|
+| <img src="screenshots/home-pink.png" width="280" alt="樱粉主题首页"/> | <img src="screenshots/home-warm.png" width="280" alt="暖阳奶油主题首页"/> |
+
+| 体温监测 · 生病周期关联 | 多就诊人一键切换 | 首次启动引导 |
+|:---:|:---:|:---:|
+| <img src="screenshots/temperature.png" width="280" alt="体温监测"/> | <img src="screenshots/patient-switcher.png" width="280" alt="多就诊人切换"/> | <img src="screenshots/welcome.png" width="280" alt="首次启动引导"/> |
+
+---
+
 ## 💡 为什么做这个
 
 带孩子去医院是每个家长的"高频刚需场景"，但也可能是最狼狈的场景：

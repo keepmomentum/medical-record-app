@@ -1,8 +1,9 @@
 # WorkBuddy workspace metadata
 .workbuddy/
 
-# Test screenshots
+# Test screenshots (keep docs/screenshots for README)
 *.png
+!screenshots/*.png
 
 # System files
 .DS_Store
