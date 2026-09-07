@@ -72,7 +72,15 @@ const App = {
     followUp: { title: '复诊安排', icon: 'refresh', color: '#EF4444', bg: '#FEE2E2', iconSvg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>' },
   },
 
-  init() {
+  async init() {
+    // 原生壳内：先尝试从原生 SQLite 快照恢复数据（防 WebView 数据被清理）
+    if (window.NativeBridge && window.NativeBridge.isNative()) {
+      const restored = await Store.restoreFromNative();
+      if (restored) {
+        console.log('[App] 已从原生存储恢复数据');
+      }
+    }
+
     // Seed demo data on first run
     Store.seedDemoData();
 
@@ -558,8 +566,11 @@ const App = {
       return;
     }
 
+    // 原生壳内由 AVAudioEngine 负责采集，不依赖浏览器的 MediaRecorder
+    const useNative = !!(window.NativeBridge && window.NativeBridge.isNative());
+
     // Check if MediaRecorder is available
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (!useNative && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)) {
       this.toast('当前环境不支持录音，请使用Demo模式');
       setTimeout(() => this.startDemo(), 1000);
       return;
@@ -611,39 +622,63 @@ const App = {
   async finishRecording() {
     const result = await Recorder.stop();
 
-    if (!result || result.duration < 1) {
+    const duration = result ? result.duration : 0;
+    if (!result || duration < 1) {
       this.toast('录音时间太短，请重新录制');
       this.renderRecord();
       return;
     }
 
+    // 原生端：苹果/安卓壳已完成离线转写，直接带着文本进入整理
+    if (result.native) {
+      if (!result.transcript) {
+        this.toast('没听清，请靠近医生再录一次');
+        this.renderRecord();
+        return;
+      }
+      this.state.audioUrl = null;
+      this.navigate('processing', {
+        duration,
+        transcript: result.transcript,
+        rtf: result.rtf,
+        corrected: result.corrected,
+      });
+      return;
+    }
+
     this.state.audioUrl = result.url;
-    this.navigate('processing', { duration: result.duration });
+    this.navigate('processing', { duration });
   },
 
   // ========== PROCESSING VIEW ==========
   renderProcessing(params) {
+    const stepTitles = params.transcript
+      ? ['离线语音识别', '理解医嘱内容', '提取关键信息', '结构化分类', '生成就医记录']
+      : AIProcessor.STEPS.map(s => s.text);
+
     const content = document.getElementById('content');
     content.innerHTML = `
       <div class="processing-view">
         <div class="processing-animation">
           <div class="processing-spinner"></div>
         </div>
-        <div class="processing-title">AI智能分析中</div>
-        <div style="font-size:14px;color:var(--text-3);">正在整理医嘱信息...</div>
+        <div class="processing-title">${params.transcript ? '整理医嘱信息' : 'AI智能分析中'}</div>
+        <div style="font-size:14px;color:var(--text-3);">${
+          params.transcript ? '已离线识别完成，正在分类整理...' : '正在整理医嘱信息...'
+        }</div>
+        ${params.rtf ? `<div style="font-size:12px;color:var(--text-3);margin-top:4px;">识别实时率 RTF ${params.rtf.toFixed(3)}${params.corrected ? ' · 已做医疗术语纠错' : ''}</div>` : ''}
 
         <div class="processing-steps" id="processing-steps">
-          ${AIProcessor.STEPS.map((step, i) => `
+          ${stepTitles.map((text, i) => `
             <div class="processing-step pending" id="step-${i}">
               <div class="processing-step-icon">${i + 1}</div>
-              <div class="processing-step-text">${step.text}</div>
+              <div class="processing-step-text">${text}</div>
             </div>
           `).join('')}
         </div>
       </div>
     `;
 
-    // Start processing
     AIProcessor.process((stepIndex, status) => {
       const stepEl = document.getElementById(`step-${stepIndex}`);
       if (stepEl) {
@@ -656,7 +691,7 @@ const App = {
           stepEl.querySelector('.processing-step-icon').innerHTML = '<div class="loading-dots"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>';
         }
       }
-    }).then(result => {
+    }, { transcript: params.transcript }).then(result => {
       // Save the visit
       const patientId = this.state.selectedPatientId;
       const visit = Store.addVisit({
@@ -664,6 +699,9 @@ const App = {
         patientId: patientId,
         recordingDuration: params.duration || 0,
         visitDate: new Date().toISOString(),
+        // 保留识别原文，方便后续校对（离线规则结构化必然有误差）
+        transcript: params.transcript || '',
+        source: result.source || 'demo',
       });
 
       this.state.currentVisitId = visit.id;
@@ -739,6 +777,8 @@ const App = {
       ${this.renderCategorySection(visit, 'observeSymptoms')}
       ${this.renderCategorySection(visit, 'prevention')}
       ${this.renderCategorySection(visit, 'followUp')}
+
+      ${this.renderRawNotesSection(visit)}
 
       ${this.renderTempSection(visit)}
 
@@ -825,6 +865,34 @@ const App = {
         </div>
         <div class="category-body">
           ${body}
+        </div>
+      </div>
+    `;
+  },
+
+  /**
+   * 未分类医嘱原文
+   * 离线规则结构化无法归类的句子会集中在这里，避免信息丢失。
+   */
+  renderRawNotesSection(visit) {
+    const notes = visit.rawNotes;
+    if (!Array.isArray(notes) || notes.length === 0) return '';
+
+    return `
+      <div class="category-section">
+        <div class="category-header">
+          <div class="category-icon" style="background:rgba(120,120,120,.12);color:var(--text-3);">
+            ${this.icons.doc}
+          </div>
+          <div class="category-title">其他医嘱</div>
+        </div>
+        <div class="category-body">
+          <ul class="cat-list">
+            ${notes.map(n => `<li>${this.escape(n)}</li>`).join('')}
+          </ul>
+          <div style="font-size:12px;color:var(--text-3);margin-top:8px;">
+            以上内容未能自动归类，可手动补充到对应分类
+          </div>
         </div>
       </div>
     `;
@@ -2408,5 +2476,5 @@ const App = {
 
 // Initialize app on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-  App.init();
+  App.init().catch(e => console.error('[App] 初始化失败:', e));
 });

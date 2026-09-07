@@ -1,0 +1,13 @@
+// 评测集清单（JSON Lines，每行一条）
+// 字段：
+//   audio    音频文件名（相对 asr-poc/audio/ 目录）  必填
+//   text     人工校对的标准转写文本                   必填
+//   scene    场景标签，用于分组统计（可选）
+//   verified 是否已人工复核（示例数据为 false，仅用于连通性冒烟）
+//
+// 示例音频说明：以下两条来自 sherpa-onnx 官方测试集，非医疗场景，
+// CER 数字没有业务参考价值，仅用于验证工具链可用。
+// 请替换为真实的儿科问诊录音后，指标才有意义（详见本目录 README.md）。
+
+{"audio": "sense-zh.wav", "text": "开放时间早上9点至下午5点", "scene": "smoke", "verified": false}
+{"audio": "paraformer-0.wav", "text": "对我做了介绍啊那么我想说的是呢大家如果对我的研究感兴趣呢", "scene": "smoke", "verified": false}

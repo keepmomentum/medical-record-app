@@ -340,8 +340,207 @@ const AIProcessor = {
     return { ...this.SCENARIOS[key], scenarioKey: key };
   },
 
+  /**
+   * 关键词分类规则（结构化兜底方案）
+   *
+   * 说明：理想的医嘱结构化应交给大模型完成。但在「本地离线」场景下
+   * （sherpa-onnx 转写后没有 LLM），先用规则把转写文本分到 9 大分类，
+   * 保证医生说的话能被分门别类地归档，不丢失信息。
+   * 后续接入端侧小模型 / 云端 LLM 后，本方法可被直接替换。
+   */
+  CATEGORY_RULES: [
+    { key: 'medications', words: ['药', '服用', '吃', '毫升', 'ml', '毫克', 'mg', '袋', '片', '每次', '每日', '一天', '顿', '冲剂', '颗粒', '混悬', '喷雾', '滴', '饭后', '饭前', '疗程', '抗生素', '退烧', '雾化', '输液', '涂抹'] },
+    { key: 'care', words: ['多喝水', '温水', '擦浴', '物理降温', '降温', '休息', '保暖', '通风', '湿度', '睡眠', '睡', '护理', '拍背', '漱口', '清洗', '冷敷', '热敷', '隔离'] },
+    { key: 'recovery', words: ['饮食', '清淡', '忌', '辛辣', '油腻', '生冷', '水果', '粥', '面条', '营养', '维生素', '喝水', '奶', '辅食', '胃口', '食欲'] },
+    { key: 'observeSymptoms', words: ['观察', '如出现', '如果出现', '警惕', '注意观察', '精神', '嗜睡', '抽搐', '惊厥', '呼吸', '尿量', '皮疹', '呕吐', '腹泻加重', '持续不退', '反复', '监测', '体温'] },
+    { key: 'precautions', words: ['不要', '避免', '禁止', '切勿', '慎用', '不能', '过敏', '不良反应', '慎用', '停止', '忌用', '隔离'] },
+    { key: 'prevention', words: ['预防', '洗手', '疫苗', '锻炼', '体质', '免疫力', '人多', '交叉感染', '口罩', '传染'] },
+    { key: 'followUp', words: ['复诊', '复查', '随访', '周后', '天后', '再来', '门诊', '回院', '复查看'] },
+    { key: 'symptoms', words: ['发热', '发烧', '咳嗽', '流涕', '鼻塞', '呕吐', '腹泻', '疼痛', '红疹', '咽痛', '喉咙', '气喘', '喘息', '乏力', '没精神'] },
+    { key: 'cause', words: ['病毒', '细菌', '感染', '受凉', '过敏', '抵抗力', '炎症', '血常', '白细胞', '支原体', '流感', '因为', '引起', '导致'] },
+  ],
+
+  /** 常见剂型后缀，用于从句子里猜药名 */
+  MEDICINE_SUFFIXES: ['干混悬剂', '混悬液', '颗粒', '口服液', '喷雾剂', '片', '胶囊', '冲剂', '糖浆', '软膏', '滴剂', '散'],
+
+  /**
+   * 把真实转写文本结构化为 9 大分类
+   * @param {string} text 转写原文
+   * @returns {object} 与 SCENARIOS 同构的记录对象
+   */
+  structureTranscript(text) {
+    const empty = {
+      diagnosis: '',
+      hospital: '',
+      department: '',
+      doctorName: '',
+      cause: '',
+      symptoms: [],
+      medications: [],
+      care: [],
+      recovery: [],
+      precautions: [],
+      observeSymptoms: [],
+      prevention: [],
+      followUp: { timing: '', conditions: [] },
+      rawNotes: [],
+    };
+
+    if (!text || !text.trim()) return empty;
+
+    // 切句：先按句末标点，再按分号；过滤过短片段
+    const sentences = text
+      .split(/[。！？!?；;\n]+/)
+      .map(s => s.replace(/[，,、]/g, ' ').trim())
+      .filter(s => s.replace(/\s/g, '').length >= 4);
+
+    const result = { ...empty };
+
+    for (const sentence of sentences) {
+      const lower = sentence.toLowerCase();
+      let best = null;
+      let bestScore = 0;
+
+      for (const rule of this.CATEGORY_RULES) {
+        let score = 0;
+        for (const word of rule.words) {
+          if (lower.includes(word)) score += word.length >= 3 ? 2 : 1;
+        }
+        // 「病因」类要求句子有判断意味，避免被普通描述抢占
+        if (rule.key === 'cause' && !/(是|因为|由于|引起|导致|感染|病毒|细菌)/.test(sentence)) {
+          score = 0;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = rule.key;
+        }
+      }
+
+      if (!best) {
+        result.rawNotes.push(sentence);
+        continue;
+      }
+
+      if (best === 'medications') {
+        result.medications.push(this._extractMedication(sentence));
+      } else if (best === 'followUp') {
+        if (!result.followUp.timing) {
+          result.followUp.timing = sentence;
+        } else {
+          result.followUp.conditions.push(sentence);
+        }
+      } else if (best === 'cause') {
+        result.cause = result.cause ? result.cause + ' ' + sentence : sentence;
+      } else {
+        result[best].push(sentence);
+      }
+    }
+
+    result.diagnosis = this._extractDiagnosis(text);
+    result.transcript = text;
+    result.source = 'asr';
+    return result;
+  },
+
+  /** 从句子中抽取药名与用法 */
+  _extractMedication(sentence) {
+    let name = '';
+    for (const suffix of this.MEDICINE_SUFFIXES) {
+      const index = sentence.indexOf(suffix);
+      if (index > 0) {
+        // 从后缀往前取最多 10 个字符作为药名
+        const start = Math.max(0, index - 10);
+        name = sentence.slice(start, index + suffix.length).trim();
+        name = name.replace(/^[的用了吃给再还，, ]+/, '');
+        break;
+      }
+    }
+    if (!name) {
+      name = sentence.slice(0, Math.min(12, sentence.length));
+    }
+
+    // 用法：优先整句里的「每日/每天…」，其次「每次…」
+    const freqPatterns = [
+      /(?:每日|每天|一天|一日)[^，。；\s]{0,6}/,
+      /(?:早晚|早中晚)[^，。；\s]{0,6}/,
+      /[^，。；\s]{0,4}小时[^，。；\s]{0,4}/,
+    ];
+    let frequency = '见医嘱原文';
+    for (const p of freqPatterns) {
+      const m = sentence.match(p);
+      if (m && !/每次/.test(m[0])) {
+        frequency = m[0];
+        break;
+      }
+    }
+
+    // 剂量：每次一袋 / 四毫升 / 2.5ml 等
+    const doseMatch = sentence.match(/每次[^，。；\s]{1,8}/)
+      || sentence.match(/\d+(\.\d+)?\s*(毫升|ml|毫克|mg|袋|片|滴|喷)/i);
+
+    return {
+      name,
+      dosage: doseMatch ? doseMatch[0] : '见医嘱原文',
+      frequency,
+      durationDays: this._extractDays(sentence) || 0,
+      notes: sentence,
+    };
+  },
+
+  /** 中文数字转阿拉伯数字（支持 1-99） */
+  _cnToNumber(s) {
+    if (!s) return 0;
+    if (/^\d+$/.test(s)) return parseInt(s, 10);
+    const CN = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    if (s.length === 1) return CN[s] ?? 0;
+    if (s.includes('十')) {
+      const [a, b] = s.split('十');
+      return (a ? (CN[a] ?? 0) : 1) * 10 + (b ? (CN[b] ?? 0) : 0);
+    }
+    return 0;
+  },
+
+  _extractDays(sentence) {
+    // 排除「一天两次」这类用法表达，只认真正的疗程天数
+    const m = sentence.match(/([0-9一二三四五六七八九十两]+)\s*(?:天|日)(?!后|内|[一两二三四五六七八九十]?次)/);
+    return m ? this._cnToNumber(m[1]) : 0;
+  },
+
+  /** 从整段文本猜测诊断名 */
+  _extractDiagnosis(text) {
+    const patterns = [
+      /诊断[是为：: ]?([^，。；]{2,15})/,
+      /([^，。；]{2,10}(?:炎|感染|感冒|手足口病|咽峡炎|肺炎|鼻炎|腹泻|湿疹|皮疹|过敏))/,
+    ];
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m && m[1]) {
+        return m[1].trim()
+          .replace(/^(考虑|可能是|像是|诊断[是为：: ]?)/, '')
+          // 去掉口语主语，保留病名本身
+          .replace(/^(孩子|宝宝|小朋友|患儿|这|他|她|就是|是)+/, '')
+          .trim();
+      }
+    }
+    return '';
+  },
+
   // 模拟AI处理流程
-  async process(onStepUpdate) {
+  async process(onStepUpdate, options = {}) {
+    // 传入了真实转写文本（iOS 端 sherpa-onnx 离线识别结果）时，
+    // 走「真实文本 → 结构化」路径，不再返回模拟场景
+    if (options.transcript && options.transcript.trim()) {
+      const result = this.structureTranscript(options.transcript.trim());
+      const steps = this.STEPS.length;
+      for (let i = 0; i < steps; i++) {
+        onStepUpdate(i, 'active');
+        // 本地结构化很快，保留极短节奏让界面有反馈
+        await new Promise(resolve => setTimeout(resolve, i === 0 ? 200 : 150));
+        onStepUpdate(i, 'done');
+      }
+      return result;
+    }
+
     const scenario = this.getRandomScenario();
 
     for (let i = 0; i < this.STEPS.length; i++) {
@@ -355,6 +554,6 @@ const AIProcessor = {
       onStepUpdate(i, 'done');
     }
 
-    return scenario;
+    return { ...scenario, source: 'demo' };
   },
 };

@@ -89,12 +89,28 @@ python3 -m http.server 9123
 
 > 首次使用会有主题 + 身份引导页，之后在"我的"页面添加就诊人即可开始记录。
 
+## 📱 iOS 原生 App
+
+目标是发布 **Android + iOS 原生 App**。当前 Web SPA 是过渡形态，**iOS 端采用「Swift 原生壳 + WKWebView 复用现有 UI + 离线 ASR」**的混合架构。
+
+- **离线语音识别**：[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0) 通过 SPM 集成，iOS xcframework 预编译
+- **统一 ONNX Runtime 底座**：未来 OCR 接入复用同一套协议
+- **数据双写兜底**：Web 端 localStorage + 原生 SQLite 互为备份
+- **Web 端零改造**：同一份代码在浏览器与 iOS App 中都能跑
+
+详细见 [`ios/README.md`](ios/README.md) 与 [`docs/iOS技术方案规划.md`](docs/iOS技术方案规划.md)。
+
+ASR 模型选型评测见 [`asr-poc/`](asr-poc/)（macOS 上一键跑通）。
+
 ## 🗺️ Roadmap（优化中）
 
+- [ ] **iOS 端首发版**：M0 POC 已完成（脚本+模型+评测），待装 Xcode 后进入 M1 工程搭建
+- [ ] Android 端
 - [ ] 数据云端同步 / 导出备份（目前为本地存储）
-- [ ] AI 转写与结构化能力接入更多模型
+- [ ] AI 转写与结构化能力接入更多模型（含端侧小模型）
 - [ ] 就诊记录分享给家庭成员
 - [ ] 疫苗接种与预防保健记录
+- [ ] 病例 OCR 识别（化验单/处方结构化录入）
 - [ ] PWA 离线支持
 
 ## ⚠️ 免责声明

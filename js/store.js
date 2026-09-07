@@ -25,9 +25,84 @@ const Store = {
   _write(key, value) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      this._scheduleNativeSync();
       return true;
     } catch (e) {
       console.error('Store write error:', key, e);
+      return false;
+    }
+  },
+
+  // ===== 原生端数据保护 =====
+  //
+  // iOS 上 WKWebView 的 localStorage 位于 WebKit 数据目录，
+  // 系统在磁盘紧张时会清理它——病历属于不可丢失数据。
+  // 因此每次写入后节流同步一份全量快照到原生 SQLite 兜底。
+
+  _nativeSyncTimer: null,
+
+  _scheduleNativeSync() {
+    if (!window.NativeBridge || !window.NativeBridge.isNative()) return;
+    if (this._nativeSyncTimer) clearTimeout(this._nativeSyncTimer);
+    this._nativeSyncTimer = setTimeout(() => this.syncToNative(), 2000);
+  },
+
+  /** 全量快照写入原生存储 */
+  async syncToNative() {
+    if (!window.NativeBridge || !window.NativeBridge.isNative()) return false;
+    try {
+      const snapshot = {
+        version: 1,
+        syncedAt: new Date().toISOString(),
+        patients: this.getPatients(),
+        visits: this.getVisits(),
+        reminders: this.getReminders(),
+        tempRecords: this.getTempRecords(),
+        settings: this.getSettings(),
+      };
+      await window.NativeBridge.storeSet('yilu_snapshot', JSON.stringify(snapshot));
+      return true;
+    } catch (e) {
+      console.error('原生同步失败:', e);
+      return false;
+    }
+  },
+
+  /**
+   * 启动恢复：本地无数据而原生存在快照时，从原生恢复
+   * @returns {Promise<boolean>} 是否发生了恢复
+   */
+  async restoreFromNative() {
+    if (!window.NativeBridge || !window.NativeBridge.isNative()) return false;
+    try {
+      const raw = await window.NativeBridge.storeGet('yilu_snapshot');
+      if (!raw) return false;
+
+      const hasLocal = localStorage.getItem(this.KEYS.PATIENTS)
+        || localStorage.getItem(this.KEYS.VISITS);
+      if (hasLocal) return false;
+
+      const snap = JSON.parse(raw);
+      if (!snap) return false;
+
+      if (Array.isArray(snap.patients) && snap.patients.length) {
+        localStorage.setItem(this.KEYS.PATIENTS, JSON.stringify(snap.patients));
+      }
+      if (Array.isArray(snap.visits) && snap.visits.length) {
+        localStorage.setItem(this.KEYS.VISITS, JSON.stringify(snap.visits));
+      }
+      if (Array.isArray(snap.reminders)) {
+        localStorage.setItem(this.KEYS.REMINDERS, JSON.stringify(snap.reminders));
+      }
+      if (Array.isArray(snap.tempRecords)) {
+        localStorage.setItem(this.KEYS.TEMP_RECORDS, JSON.stringify(snap.tempRecords));
+      }
+      if (snap.settings) {
+        localStorage.setItem(this.KEYS.SETTINGS, JSON.stringify(snap.settings));
+      }
+      return true;
+    } catch (e) {
+      console.error('原生恢复失败:', e);
       return false;
     }
   },
@@ -120,7 +195,9 @@ const Store = {
       observeSymptoms: data.observeSymptoms || [],
       prevention: data.prevention || [],
       followUp: data.followUp || { timing: '', conditions: [] },
+      rawNotes: Array.isArray(data.rawNotes) ? data.rawNotes : [],
       transcript: data.transcript || '',
+      source: data.source || 'demo',
       images: data.images || [],
       createdAt: new Date().toISOString(),
     };

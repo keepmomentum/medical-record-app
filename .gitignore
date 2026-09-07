@@ -7,3 +7,17 @@
 
 # System files
 .DS_Store
+
+# ASR POC: 模型与音频体积过大，用 scripts/download_models.sh 按需获取
+asr-poc/models/
+asr-poc/audio/
+asr-poc/results/
+__pycache__/
+*.pyc
+venv/
+
+# Xcode 用户态与构建产物
+ios/*.xcodeproj/
+ios/build/
+DerivedData/
+*.xcuserstate

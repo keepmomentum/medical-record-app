@@ -14,7 +14,30 @@ const Recorder = {
   timerInterval: null,
   isRecording: false,
 
+  /**
+   * 录音模式：
+   *   web    - 浏览器 MediaRecorder（兜底）
+   *   native - iOS 原生 AVAudioEngine + sherpa-onnx（离线识别）
+   */
+  mode: 'web',
+
+  /** 是否运行在原生壳内 */
+  useNative() {
+    return !!(window.NativeBridge && window.NativeBridge.isNative());
+  },
+
   async start() {
+    // 原生环境：交给 AVAudioEngine 采集，识别在 stop 时一并完成
+    if (this.useNative()) {
+      this.mode = 'native';
+      await window.NativeBridge.startRecording();
+      this.isRecording = true;
+      this.startTime = Date.now();
+      this._startTimer();
+      return true;
+    }
+
+    this.mode = 'web';
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.audioChunks = [];
@@ -55,7 +78,24 @@ const Recorder = {
     }
   },
 
-  stop() {
+  async stop() {
+    // 原生：一步完成「停止录音 + 离线识别」，直接拿到转写文本
+    if (this.mode === 'native') {
+      const result = await window.NativeBridge.stopAndTranscribe();
+      const duration = Math.floor((Date.now() - this.startTime) / 1000);
+      this.isRecording = false;
+      this._cleanup();
+      return {
+        blob: null,
+        url: null,
+        native: true,
+        duration: result.duration ? Math.round(result.duration) : duration,
+        transcript: (result.text || '').trim(),
+        rtf: result.rtf,
+        corrected: !!result.corrected,
+      };
+    }
+
     return new Promise((resolve) => {
       if (!this.mediaRecorder || !this.isRecording) {
         resolve(null);
@@ -81,6 +121,13 @@ const Recorder = {
   },
 
   cancel() {
+    if (this.mode === 'native' && this.isRecording) {
+      this.isRecording = false;
+      window.NativeBridge.cancelRecording().catch(() => {});
+      this._cleanup();
+      return;
+    }
+
     if (this.mediaRecorder && this.isRecording) {
       this.mediaRecorder.stop();
       this.isRecording = false;
