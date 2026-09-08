@@ -1,4 +1,9 @@
-name: Yilu
+# 离线验证工程：不含 sherpa-onnx SPM 依赖
+# 用途：在没有网络 / SwiftPM 不可用的环境下，验证 App 主体（WebView 壳 + 桥接 + SQLite）能否编译运行。
+# ASR 会因 canImport 失败而走桩实现（录音可用，转写为空）。
+# 生成：xcodegen generate --spec project.nospm.yml
+
+name: YiluNoSPM
 
 options:
   bundleIdPrefix: com.yilu
@@ -14,11 +19,6 @@ settings:
     TARGETED_DEVICE_FAMILY: "1"
     IPHONEOS_DEPLOYMENT_TARGET: "15.0"
 
-packages:
-  # sherpa-onnx 官方 SPM 包，内含 iOS 预编译 xcframework，无需本地编译 C++
-  sherpa-onnx:
-    url: https://github.com/k2-fsa/sherpa-onnx
-    from: "1.12.0"
 
 targets:
   Yilu:
@@ -36,9 +36,6 @@ targets:
       - path: Yilu/Resources
         type: folder
         buildPhase: resources
-    dependencies:
-      - package: sherpa-onnx
-        product: sherpa-onnx
     info:
       path: Yilu/Info.plist
       properties:
@@ -60,6 +57,6 @@ targets:
       base:
         # 显式指定，某些 Xcode 版本下不指定会导致产物名为空（FULL_PRODUCT_NAME = .app）
         PRODUCT_NAME: Yilu
-        PRODUCT_BUNDLE_IDENTIFIER: com.yilu.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.yilu.nospm
         # 模型较大，允许 HTTP 下载但不滥用；生产环境请全部走 HTTPS
         OTHER_LDFLAGS: -ObjC

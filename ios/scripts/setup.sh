@@ -13,6 +13,11 @@
 #
 set -euo pipefail
 
+# 某些执行环境（CI / 沙箱 / AppleScript 调用）里 USER 为空，
+# XcodeGen 会因取不到用户名而报 "Couldn't find current username" 并终止
+export USER="${USER:-$(id -un)}"
+export LOGNAME="${LOGNAME:-$(id -un)}"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 RESOURCES="$ROOT/Yilu/Resources"
@@ -39,12 +44,17 @@ find "$WEB_DIR" -type f | sed "s|$WEB_DIR/|    web/|" | head -20
 
 if [[ "${1:-}" == "--xcodegen" ]]; then
   echo "==> 生成 Xcode 工程"
-  if ! command -v xcodegen >/dev/null 2>&1; then
-    echo "    [error] 未安装 xcodegen，请先执行: brew install xcodegen"
-    echo "    或者手动创建 iOS App 工程，再把 Yilu/ 目录拖入。"
+  XGEN="$(command -v xcodegen || echo "$HOME/.local/bin/xcodegen")"
+  if [[ ! -x "$XGEN" ]]; then
+    echo "    [error] 未找到 xcodegen。安装方式："
+    echo "      brew install xcodegen"
+    echo "      或: curl -sL https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip -o /tmp/xg.zip \\"
+    echo "          && unzip -q /tmp/xg.zip -d /tmp/xg && mkdir -p ~/.local/bin \\"
+    echo "          && cp /tmp/xg/xcodegen/bin/xcodegen ~/.local/bin/ && xattr -cr ~/.local/bin/xcodegen"
+    echo "    也可以手动创建 iOS App 工程，再把 Yilu/ 目录拖入。"
     exit 1
   fi
-  (cd "$ROOT" && xcodegen generate)
+  (cd "$ROOT" && "$XGEN" generate)
   echo "    已生成 $ROOT/Yilu.xcodeproj"
 fi
 

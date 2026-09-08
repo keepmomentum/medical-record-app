@@ -4,9 +4,23 @@
 
 ## 当前状态
 
-**工程骨架已就绪**，所有 Swift 源文件、桥接协议、模型管理、数据库层都按 iOS 架构设计完成。本机（macOS 26.6.2 / Apple Silicon）**未安装完整 Xcode**，因此**未做完整编译验证**。
+**已在本机完成编译验证**（Xcode 26.6 / iOS SDK 26.5 / arm64 模拟器）：
 
-> 完整 Xcode 安装后（`xcode-select --install` 仅含 CommandLineTools，需要从 App Store 装 Xcode），按下方"快速开始"操作即可在真机跑通。
+```
+bash scripts/build.sh nospm     # ✅ BUILD SUCCEEDED
+```
+
+`project.nospm.yml` 是不含 sherpa-onnx SPM 依赖的验证工程，用于确认 App 主体
+（SwiftUI 壳 + WKWebView 桥接 + SQLite + 录音）能编译并正确打包，ASR 走桩实现。
+
+| 验证项 | 结果 |
+|---|---|
+| 11 个 Swift 源文件语法 | ✅ |
+| 模拟器 arm64 编译链接 | ✅ |
+| Web 资源打进 App 包（7 个文件，保留 css/js 目录结构） | ✅ |
+| Info.plist 权限声明与设备能力 | ✅ |
+
+**尚未验证**：真机运行、sherpa-onnx 实际推理（见下方"环境限制"）。
 
 ## 架构
 
@@ -96,6 +110,14 @@ Xcode 首次打开时会自动解析 `sherpa-onnx` SPM 依赖（需联网下载�
 
 `Cmd + R`。首次启动会自动开始下载 SenseVoice 模型（**约 230MB**），完成后应用顶部出现「模型已就绪」提示，再次录音即走完整离线识别流程。
 
+也可以不打开 Xcode 直接命令行编译：
+
+```bash
+bash scripts/build.sh            # 模拟器（含 SPM 依赖，需联网）
+bash scripts/build.sh nospm      # 无 SPM 依赖，离线也能编
+bash scripts/build.sh device     # 真机（不签名，只验证能否编译）
+```
+
 ## Web 端桥接协议
 
 JS 侧统一通过：
@@ -137,10 +159,64 @@ Xcode 重新跑即可看到效果。
 
 ## 已知问题 / 风险
 
-- **XcodeGen 生成的工程在 Xcode 15/16 上需确认**（本机未实测）
 - **首次启动下载 230MB** 需要给用户清晰引导
 - **沙箱路径变更**时（iOS 17 → 18）需要验证 Application Support 路径仍然有效
 - **App Store 审核**「4.2 混合包」类目近年趋严（强制要求原生价值高于 Web）；MVP 先不上架，走 TestFlight 验证
+
+## 排障手册（都是实际踩过的坑）
+
+### 1. XcodeGen 报 `Couldn't find current username`
+
+某些执行环境（沙箱、CI、被 AppleScript 调起）里 `USER` 环境变量为空，XcodeGen 会直接退出。
+`scripts/setup.sh` 已内置兜底；手动执行时先补上：
+
+```bash
+export USER="${USER:-$(id -un)}"
+```
+
+### 2. `buildPhase: resources` 没生效，资源没进工程
+
+两个原因都可能触发：
+- 同一 `sources` 列表里前面的条目用 `excludes: ["Resources/**"]`，会把后面显式声明的资源路径一起过滤掉
+  → 改为**显式列出每个源码目录**，不要用 excludes 排除资源目录
+- XcodeGen 生成工程后，`Info.plist` 里手写的键会被覆盖
+  → 所有 plist 键必须写在 `project.yml` 的 `info.properties` 里（本项目已配好：权限说明、`UILaunchScreen`、方向、设备能力）
+
+### 3. `error: Multiple commands produce '.../.app'`
+
+`PRODUCT_NAME` 解析为空，产物名变成 `.app`。在 target settings 里显式写 `PRODUCT_NAME: Yilu` 即可。
+
+### 4. `project.yml` 里 `minVersion` 报 Unknown package requirement
+
+XcodeGen 的版本约束要用 `from:`（或 `minVersion` + `maxVersion` 成对出现）。
+
+### 5. 代理环境下 SPM 解析失败
+
+在受限网络里会遇到两类报错，处理方式不同：
+
+| 报错 | 原因 | 处理 |
+|---|---|---|
+| `CONNECT tunnel failed, response 502` / 克隆一直卡住 | 代理拦截了 `github.com` 的 **git** 协议 | 用 `git config url.<local>.insteadOf` 把仓库重定向到本地镜像 |
+| `sandbox-exec: sandbox_apply: Operation not permitted` | 运行环境禁止嵌套沙箱，**任何** Swift 包（含最简测试包）都无法编译 manifest | 换在普通终端 / Xcode GUI 里执行 |
+
+本地镜像做法（已验证可用）：
+
+```bash
+# 用 codeload（不走 git 协议）拿源码，做成带版本 tag 的本地仓库
+git config --global url."file:///绝对路径/sherpa-onnx".insteadOf "https://github.com/k2-fsa/sherpa-onnx"
+```
+
+> 二进制 xcframework 是从 `github.com/.../releases/download/` 下载的（走 HTTPS 直连，通常不受影响）。
+
+### 6. 想在没有网络的环境里验证工程
+
+用 `project.nospm.yml`：
+
+```bash
+bash scripts/build.sh nospm
+```
+
+`ASRService.swift` 全部用 `#if canImport(SherpaOnnx)` 包裹，缺依赖时自动降级为桩实现（能录音、转写为空），工程照样编译运行。
 
 ## 相关文档
 

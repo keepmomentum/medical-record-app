@@ -75,14 +75,26 @@ public struct WebViewContainer: UIViewRepresentable {
         }
         #endif
 
-        guard let root = Bundle.main.url(forResource: "web/index", withExtension: "html")
-                ?? Bundle.main.url(forResource: "index", withExtension: "html") else {
+        guard let root = Self.locateIndexHTML() else {
             let html = "<h2 style='font-family:-apple-system'>未找到 Web 资源</h2>"
             webView.loadHTMLString(html, baseURL: nil)
             return
         }
-        // 允许读取同目录及子目录资源
+        // 允许读取同目录及子目录（css/ js/）资源
         webView.loadFileURL(root, allowingReadAccessTo: root.deletingLastPathComponent())
+    }
+
+    /// 定位内置 index.html。
+    /// 注意：Bundle.url(forResource:) 的 name 不支持 "web/index" 这种带斜杠的写法，
+    /// 必须用 subdirectory 参数。这里按多种资源布局依次尝试，避免工程配置变更时静默失败。
+    private static func locateIndexHTML() -> URL? {
+        let subdirs = ["Resources/web", "web", nil]
+        for subdir in subdirs {
+            if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: subdir) {
+                return url
+            }
+        }
+        return Bundle.main.url(forResource: "index", withExtension: "html")
     }
 
     // MARK: 协调器

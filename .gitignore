@@ -19,5 +19,9 @@ venv/
 # Xcode 用户态与构建产物
 ios/*.xcodeproj/
 ios/build/
+ios/build-nospm/
 DerivedData/
 *.xcuserstate
+
+# 本地 Xcode 资源副本（由 scripts/sync_web.sh 生成）
+ios/Yilu/Resources/

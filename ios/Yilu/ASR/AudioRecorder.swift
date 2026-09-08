@@ -39,7 +39,7 @@ public final class AudioRecorder: @unchecked Sendable {
     private let sampleLock = NSLock()
 
     private var startedAt: Date?
-    private(set) var isRecording: Bool { engine != nil }
+    public var isRecording: Bool { engine != nil }
 
     /// 实时音量回调（0...1），供 UI 画波形
     public var onLevel: ((Float) -> Void)?
@@ -49,8 +49,16 @@ public final class AudioRecorder: @unchecked Sendable {
     // MARK: 权限
 
     public static func requestPermission() async -> Bool {
-        await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
+        // AVAudioApplication 仅在 iOS 17+ 可用，为保持 iOS 15 兼容这里做分支
+        if #available(iOS 17.0, *) {
+            return await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+        return await withCheckedContinuation { continuation in
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
         }

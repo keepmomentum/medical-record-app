@@ -43,11 +43,12 @@ public struct BridgeResponse: Codable, Sendable {
         self.error = error
     }
 
-    public static func success(_ type: String, requestId: String?, _ payload: [String: AnyCodable]? = nil) -> BridgeResponse {
+    // 注意：两个参数都是无标签的位置参数，调用处统一写 success(type, requestId, payload)
+    public static func success(_ type: String, _ requestId: String?, _ payload: [String: AnyCodable]? = nil) -> BridgeResponse {
         BridgeResponse(type: type, requestId: requestId, ok: true, payload: payload)
     }
 
-    public static func failure(_ type: String, requestId: String?, _ error: Error) -> BridgeResponse {
+    public static func failure(_ type: String, _ requestId: String?, _ error: Error) -> BridgeResponse {
         BridgeResponse(type: type, requestId: requestId, ok: false, error: error.localizedDescription)
     }
 }

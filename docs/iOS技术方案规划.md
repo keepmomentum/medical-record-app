@@ -351,3 +351,66 @@ medical-record-app/
 - 完整 Xcode 必须从 App Store 安装后才可继续 M1 阶段
 
 > **影响 M0 → M1 衔接**：跨人协作时，需在有完整 Xcode 的机器上先跑 `bash ios/scripts/setup.sh --xcodegen` 验证工程能打开、能下载 SPM、能解析桥接协议。本机只能保证代码正确性。
+
+---
+
+## 10. v1.2 进展：Xcode 环境打通与首次编译（2026-09-08）
+
+### 10.1 环境
+
+| 项 | 值 |
+|---|---|
+| Xcode | 26.6 (Build 17F113) |
+| iOS SDK | 26.5 |
+| 部署目标 | iOS 15.0（sherpa-onnx SPM 包最低要求也是 15） |
+| 芯片 | Apple Silicon（arm64） |
+
+### 10.2 首次编译结果
+
+用 `project.nospm.yml`（不含 SPM）完成**从零到产物**的验证：
+
+```
+bash ios/scripts/build.sh nospm
+→ ** BUILD SUCCEEDED **
+→ Yilu.app（可执行文件 510K，内置 7 个 Web 资源文件，保留 css/js 目录层级）
+```
+
+编译期发现并修复的真实缺陷（说明骨架代码此前从未被编译器检验过）：
+
+| 文件 | 问题 | 修复 |
+|---|---|---|
+| `AudioRecorder.swift:42` | `private(set)` 用于只读计算属性，非法 | 改为 `public var isRecording` |
+| `AudioRecorder.swift:53` | 用了 iOS 17 才有的 `AVAudioApplication` | 加 `#available(iOS 17.0, *)` 分支，回退 `AVAudioSession.requestRecordPermission` |
+| `BridgeMessage.swift` | `success/failure` 第二参是带标签的 `requestId:`，但 10+ 处调用写成了位置参数 | 改定义为位置参数（内部辅助函数） |
+| `WebViewContainer.swift` | `Bundle.url(forResource: "web/index")` 不支持路径分隔符，必定找不到 | 改用 `subdirectory:` 并按 `Resources/web` → `web` → 根 三级兜底 |
+
+工程配置层面修复：
+
+- `PRODUCT_NAME` 未显式指定导致产物名为空（`Multiple commands produce '.../.app'`）
+- `minVersion` 改为 `from:`（XcodeGen 约束写法）
+- `Info.plist` 的手写键会被 XcodeGen 覆盖 → 全部迁入 `info.properties`
+- `sources` 的 `excludes: Resources/**` 会把后续资源条目一并过滤 → 改为显式列出源码目录
+
+### 10.3 未验证项与原因
+
+**sherpa-onnx 实际推理未验证**，两个独立的环境限制：
+
+1. **git 协议被代理拦截**：`git ls-remote https://github.com/...` 返回 `CONNECT tunnel failed, response 502`。
+   已绕过：用 `codeload.github.com`（HTTP 通道可用）拉取源码，建本地镜像仓库，
+   再用 `git config url."file://...".insteadOf` 重定向，克隆可在 14 秒内完成。
+   二进制 xcframework 走 `releases/download`（HTTPS 直连）不受影响。
+
+2. **嵌套沙箱被禁**：SwiftPM 编译 Package.swift 时调用 `sandbox-exec` 报
+   `sandbox_apply: Operation not permitted`。已验证**连最简测试包也失败**，
+   属运行环境限制，与本项目无关；在普通终端或 Xcode GUI 中不会出现。
+
+   绕过思路：`project.nospm.yml` + `#if canImport` 降级，先验证 App 主体。
+
+> 结论：在有正常网络的普通终端执行 `bash ios/scripts/setup.sh --xcodegen && open Yilu.xcodeproj`，
+> SPM 解析应当能正常完成（官方提供 SPM 包 + 预编译 xcframework，无需本地编译 C++）。
+
+### 10.4 下一步（M1 收尾）
+
+1. 在普通终端跑通 SPM 解析，确认 `SherpaOnnxOfflineRecognizer` 可用
+2. 安装 iOS 模拟器运行时（Xcode → Settings → Components）或直接用真机
+3. 真机录音 → 离线转写 → 结构化，与 `asr-poc` 的 CER 数据交叉验证
