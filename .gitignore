@@ -20,8 +20,14 @@ venv/
 ios/*.xcodeproj/
 ios/build/
 ios/build-nospm/
+ios/build-device/
+ios/build-device-asr/
+ios/build-asr/
 DerivedData/
 *.xcuserstate
+
+# 预编译依赖（~50MB，由 scripts/fetch_vendor.sh 按需下载）
+ios/Vendor/
 
 # 本地 Xcode 资源副本（由 scripts/sync_web.sh 生成）
 ios/Yilu/Resources/

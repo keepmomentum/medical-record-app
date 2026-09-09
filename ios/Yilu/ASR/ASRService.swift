@@ -4,16 +4,21 @@
 //
 //  基于 sherpa-onnx 的离线语音识别服务（非流式整句识别）。
 //
-//  依赖：Swift Package Manager 添加 https://github.com/k2-fsa/sherpa-onnx
-//        （官方提供 iOS 预编译 xcframework，无需本地编译 C++）
+//  依赖（二选一，都会定义 HAS_SHERPA 编译标志）：
+//   1. SwiftPM：https://github.com/k2-fsa/sherpa-onnx（官方 iOS 预编译 xcframework）
+//   2. 本地 xcframework：见 scripts/fetch_vendor.sh，Swift 封装源码在 Yilu/SherpaOnnx/，
+//      与本 target 同编译，无需 import 语句
 //
-//  若未添加该依赖，本文件会退化为「不可用」桩实现，工程仍可编译运行，
+//  若两者都没有，本文件退化为「不可用」桩实现，工程仍可编译运行，
 //  录音功能自动回落为「只存音频不转写」，便于分阶段开发。
 //
 
 import Foundation
 
-#if canImport(SherpaOnnx)
+#if HAS_SHERPA
+// 本地 xcframework 方案：C API 由 SherpaOnnxC.framework 的 modulemap 暴露
+import SherpaOnnxC
+#elseif canImport(SherpaOnnx)
 import SherpaOnnx
 #elseif canImport(SherpaOnnxShared)
 import SherpaOnnxShared
@@ -70,7 +75,7 @@ public final class ASRService: InferenceEngine, @unchecked Sendable {
     /// 是否启用医疗术语纠错（识别后处理）
     public var enableMedicalCorrection: Bool = true
 
-    #if canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
+    #if HAS_SHERPA || canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
     private var recognizer: SherpaOnnxOfflineRecognizer?
     #endif
 
@@ -91,7 +96,7 @@ public final class ASRService: InferenceEngine, @unchecked Sendable {
                 progress(p * 0.9)
             }
 
-            #if canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
+            #if HAS_SHERPA || canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
             let recognizer = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<SherpaOnnxOfflineRecognizer, Error>) in
                 inferenceQueue.async {
                     do {
@@ -116,7 +121,7 @@ public final class ASRService: InferenceEngine, @unchecked Sendable {
         }
     }
 
-    #if canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
+    #if HAS_SHERPA || canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
     private static func makeRecognizer(
         modelDir: URL,
         spec: ModelSpec,
@@ -129,56 +134,50 @@ public final class ASRService: InferenceEngine, @unchecked Sendable {
             throw InferenceError.modelMissing(spec.name)
         }
 
-        let featConfig = sherpaOnnxFeatureConfig(sampleRate: 16000, featureDim: 80)
+        // 全部用「零初始化 + 逐字段赋值」，避免 C 结构体成员顺序随版本变化导致编译失败
+        var featConfig = SherpaOnnxFeatureConfig()
+        featConfig.sample_rate = 16000
+        featConfig.feature_dim = 80
 
-        var modelConfig: sherpaOnnxOfflineModelConfig
+        var modelConfig = SherpaOnnxOfflineModelConfig()
+        modelConfig.tokens = toCPointer(tokensPath)
+        modelConfig.num_threads = Int32(threads)
+        modelConfig.debug = 0
+        modelConfig.provider = toCPointer("cpu")
+
         switch spec.id {
         case "paraformer-zh":
-            let pf = sherpaOnnxOfflineParaformerModelConfig(model: modelPath)
-            modelConfig = sherpaOnnxOfflineModelConfig(
-                tokens: tokensPath,
-                numThreads: Int32(threads),
-                debug: 0,
-                provider: "cpu",
-                modelType: "paraformer",
-                paraformer: pf
-            )
+            var pf = SherpaOnnxOfflineParaformerModelConfig()
+            pf.model = toCPointer(modelPath)
+            modelConfig.paraformer = pf
+            modelConfig.model_type = toCPointer("paraformer")
         default:
-            // SenseVoice：开启 ITN，让「一次五毫升」不被转成「一次五毫升」以外的写法
-            let sv = sherpaOnnxOfflineSenseVoiceModelConfig(
-                model: modelPath,
-                language: "zh",
-                useInverseTextNormalization: true
-            )
-            modelConfig = sherpaOnnxOfflineModelConfig(
-                tokens: tokensPath,
-                numThreads: Int32(threads),
-                debug: 0,
-                provider: "cpu",
-                modelType: "sense_voice",
-                senseVoice: sv
-            )
+            // SenseVoice：开启 ITN，让「一次五毫升」这类说法保持数字写法
+            var sv = SherpaOnnxOfflineSenseVoiceModelConfig()
+            sv.model = toCPointer(modelPath)
+            sv.language = toCPointer("zh")
+            sv.use_itn = 1
+            modelConfig.sense_voice = sv
+            modelConfig.model_type = toCPointer("sense_voice")
         }
 
         // 医疗术语同音字替换（可选）：目录下存在 lexicon.txt 与 replace.fst 时启用
-        var hrConfig = sherpaOnnxHomophoneReplacerConfig()
-        let lexicon = modelDir.appendingPathComponent("lexicon.txt")
-        let ruleFsts = modelDir.appendingPathComponent("replace.fst")
-        if FileManager.default.fileExists(atPath: lexicon.path),
-           FileManager.default.fileExists(atPath: ruleFsts.path) {
-            hrConfig = sherpaOnnxHomophoneReplacerConfig(
-                lexicon: lexicon.path,
-                ruleFsts: ruleFsts.path
-            )
+        var hrConfig = SherpaOnnxHomophoneReplacerConfig()
+        let lexiconPath = modelDir.appendingPathComponent("lexicon.txt").path
+        let ruleFstsPath = modelDir.appendingPathComponent("replace.fst").path
+        if FileManager.default.fileExists(atPath: lexiconPath),
+           FileManager.default.fileExists(atPath: ruleFstsPath) {
+            hrConfig.lexicon = toCPointer(lexiconPath)
+            hrConfig.rule_fsts = toCPointer(ruleFstsPath)
         }
 
-        var config = sherpaOnnxOfflineRecognizerConfig(
-            featConfig: featConfig,
-            modelConfig: modelConfig,
-            decodingMethod: "greedy_search",
-            maxActivePaths: 4,
-            hr: hrConfig
-        )
+        var config = SherpaOnnxOfflineRecognizerConfig()
+        config.feat_config = featConfig
+        config.model_config = modelConfig
+        config.decoding_method = toCPointer("greedy_search")
+        config.max_active_paths = 4
+        config.hr = hrConfig
+
         return SherpaOnnxOfflineRecognizer(config: &config)
     }
     #endif
@@ -195,7 +194,7 @@ public final class ASRService: InferenceEngine, @unchecked Sendable {
         let duration = Double(samples.count) / Double(sampleRate)
         let started = Date()
 
-        #if canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
+        #if HAS_SHERPA || canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
         guard let recognizer else { throw InferenceError.notPrepared }
 
         let rawText: String = await withCheckedContinuation { continuation in
@@ -235,7 +234,7 @@ public final class ASRService: InferenceEngine, @unchecked Sendable {
     // MARK: 生命周期
 
     public func unload() {
-        #if canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
+        #if HAS_SHERPA || canImport(SherpaOnnx) || canImport(SherpaOnnxShared)
         recognizer = nil
         #endif
         state = .idle

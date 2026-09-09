@@ -58,5 +58,8 @@ targets:
         # 显式指定，某些 Xcode 版本下不指定会导致产物名为空（FULL_PRODUCT_NAME = .app）
         PRODUCT_NAME: Yilu
         PRODUCT_BUNDLE_IDENTIFIER: com.yilu.nospm
+        # 真机运行：自动管理签名（需在 Xcode → Settings → Accounts 登录 Apple ID，
+        # 登录后在 Signing & Capabilities 里选 Personal Team 即可）
+        CODE_SIGN_STYLE: Automatic
         # 模型较大，允许 HTTP 下载但不滥用；生产环境请全部走 HTTPS
         OTHER_LDFLAGS: -ObjC

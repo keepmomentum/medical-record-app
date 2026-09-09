@@ -409,8 +409,94 @@ bash ios/scripts/build.sh nospm
 > 结论：在有正常网络的普通终端执行 `bash ios/scripts/setup.sh --xcodegen && open Yilu.xcodeproj`，
 > SPM 解析应当能正常完成（官方提供 SPM 包 + 预编译 xcframework，无需本地编译 C++）。
 
-### 10.4 下一步（M1 收尾）
+### 10.4 本地 xcframework 方案（绕开 SwiftPM，已跑通）
 
-1. 在普通终端跑通 SPM 解析，确认 `SherpaOnnxOfflineRecognizer` 可用
-2. 安装 iOS 模拟器运行时（Xcode → Settings → Components）或直接用真机
-3. 真机录音 → 离线转写 → 结构化，与 `asr-poc` 的 CER 数据交叉验证
+既然 SwiftPM 在本环境不可用，改用**直接链接官方预编译静态库**，效果等价且更可控。
+
+| 项 | 内容 |
+|---|---|
+| 工程 | `project.asr.yml` → `YiluASR.xcodeproj` |
+| 依赖 1 | `sherpa-onnx-v1.13.7-ios-static.xcframework.zip`（17MB，`xcframework` tag） |
+| 依赖 2 | `onnxruntime-ios-static-xcframework-1.28.1.xcframework.zip`（33.8MB） |
+| 拉取 | `bash scripts/fetch_vendor.sh` → `ios/Vendor/`（已加入 .gitignore） |
+| Swift 封装 | `Yilu/SherpaOnnx/SherpaOnnx.swift`（官方 `swift-api-examples`，2293 行，随 App target 同编译） |
+| 编译开关 | `HAS_SHERPA`（`SWIFT_ACTIVE_COMPILATION_CONDITIONS`） |
+| 验证 | 模拟器 arm64 与真机 arm64 **均 BUILD SUCCEEDED** |
+
+三种工程的分工：
+
+| 工程 | ASR | 用途 |
+|---|---|---|
+| `YiluASR`（project.asr.yml） | ✅ 真 Sherpa-ONNX | **主用**，真机验证离线转写 |
+| `Yilu`（project.yml） | ✅ SPM | 普通网络环境下的正式工程 |
+| `YiluNoSPM`（project.nospm.yml） | ❌ 桩 | 无依赖时验证 App 主体 |
+
+#### 关键坑：官方示例文件是过时的死代码
+
+`swift-api-examples/` 下除 `SherpaOnnx.swift` 外的示例（如 `decode-file-sense-voice-with-hr.swift`）
+用的是**旧 API 命名**，与 1.13.7 头文件不符：
+
+| 示例里的写法（编译不过） | 1.13.7 真实头文件 |
+|---|---|
+| `sherpaOnnxOfflineModelConfig` | `SherpaOnnxOfflineModelConfig` |
+| `useInverseTextNormalization:` | `use_itn` |
+| `sherpaOnnxOfflineRecognizerConfig(featConfig:modelConfig:hr:)` | 成员为 `feat_config` / `model_config` / `hr`，且 memberwise init 需按声明顺序 |
+
+这些示例文件在 SPM 包里并不参与编译，所以长期没暴露问题。**一切以
+`Vendor/sherpa-onnx.xcframework/ios-arm64/SherpaOnnxC.framework/Headers/sherpa-onnx/c-api/c-api.h` 为准。**
+
+由此确定的两条写法约定：
+
+1. 配置一律「零初始化 + 逐字段赋值」（`var cfg = X(); cfg.field = ...`），
+   不用 memberwise init —— 成员顺序一变就编译失败，逐字段赋值不受影响。
+2. C API 走 **module 导入**（`import SherpaOnnxC`，framework 自带 modulemap），
+   不用 bridging header。
+
+#### 下载通道选择
+
+GitHub 网页下载被代理拦截（`CONNECT tunnel failed 502`），API 通道极慢（20KB/s，51MB 要 7 小时）。
+可用镜像：**`https://gh-proxy.com/<github-url>`，实测 5–7MB/s**，`fetch_vendor.sh` 已内置。
+
+### 10.5 下一步
+
+1. ~~手机开启开发者模式 + Xcode 登录 Apple ID~~ → 开发者模式已开启（2026-09-09 确认），仅剩 Xcode 登录 Apple ID
+2. 真机录音 → 离线转写 → 结构化，与 `asr-poc` 的 CER 数据交叉验证
+3. 模型分发：见 10.6，已有本地预置方案，不必让手机现下 230MB
+
+### 10.6 模型预置：不让手机现下 230MB（2026-09-09）
+
+**问题**：App 首次启动要下载 230MB 模型，家庭网络可能要十几分钟，体验很差。
+
+**方案**：Mac 上 `asr-poc/models/` 已有完整模型，直接用 `devicectl device copy` 推进 App 的数据容器，
+App 起来即可离线识别。脚本：`ios/scripts/push_models.sh`，且 `device_run.sh` 会在安装后自动调用。
+
+```
+bash scripts/push_models.sh                 # 推 SenseVoice（默认）
+bash scripts/push_models.sh all             # SenseVoice + Paraformer（约 460MB）
+bash scripts/push_models.sh sense-voice --dry-run
+```
+
+**目录映射**（App 端 `ModelManager` 的约定）：
+
+| 本地 | 设备上 |
+|---|---|
+| `asr-poc/models/sense-voice/*` | `Library/Application Support/models/sense-voice-zh-v1/` |
+| `asr-poc/models/paraformer/*` | `Library/Application Support/models/paraformer-zh-v1/` |
+
+目录名 `<spec.id>-v<version>` 由脚本**从 `ASRModels.swift` 解析**得来，改代码即自动同步，不会写死漂移。
+脚本推送前会逐个校验文件大小与代码声明是否一致（不一致会明确报错），避免"推了但 App 判定未就绪"。
+
+**实测踩到的两个坑（已修）**：
+
+1. **不能直接推目录** —— `devicectl copy to --source <dir>` 会把目录内容**平铺**到 destination，
+   不保留 `sense-voice-zh-v1` 这层目录名，App 端就找不到了。
+   ✅ 改为逐文件推送 + 目标路径写全，实测会自动创建多级目录。
+2. **以点开头的标记文件会被正常传输** —— 用临时域验证过 `.yilu_ready` 能正确送达，
+   无需改成无点文件名。
+
+**前置**：App 必须先装到手机上（数据容器要存在），否则报 `ContainerLookupError`。
+
+### 10.7 遗留项
+
+- Xcode 登录 Apple ID 后才能真机签名（本机当前 0 个签名证书）
+- 真机 ASR 推理尚未实测（模拟器无法录音，且命令行 `simctl install` 在本环境不可用）

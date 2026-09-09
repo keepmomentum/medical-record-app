@@ -6,6 +6,7 @@
 #   bash scripts/build.sh              # 编译到 iOS 模拟器（arm64）
 #   bash scripts/build.sh device       # 编译到真机（不签名，仅验证能否编译）
 #   bash scripts/build.sh nospm        # 用 project.nospm.yml 编译（无 SPM 依赖，离线可用）
+#   bash scripts/build.sh asr          # 用 project.asr.yml 编译（本地 xcframework，真 Sherpa-ONNX）
 #
 # 说明：
 #   - 真机运行请用 Xcode 打开工程后 Cmd+R（需要开发者账号签名）
@@ -26,6 +27,13 @@ case "$MODE" in
     PROJ="YiluNoSPM.xcodeproj"
     SCHEME="Yilu"
     DD="build-nospm"
+    ;;
+  asr)
+    # 本地 xcframework 方案：真 Sherpa-ONNX，无需 SwiftPM
+    SPEC="project.asr.yml"
+    PROJ="YiluASR.xcodeproj"
+    SCHEME="Yilu"
+    DD="build-asr"
     ;;
   *)
     SPEC="project.yml"

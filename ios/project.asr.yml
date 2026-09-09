@@ -1,10 +1,19 @@
-name: Yilu
+# 本地 xcframework 工程：绕过 SwiftPM，直接链接 sherpa-onnx + onnxruntime 预编译静态库
+#
+# 适用场景：沙箱环境 / 无网络时，SwiftPM 无法解析远程包（sandbox_apply: Operation not permitted）
+# 依赖来源：bash scripts/fetch_vendor.sh（下载到 Vendor/）
+# Swift 封装：Yilu/SherpaOnnx/SherpaOnnx.swift（官方 swift-api-examples，随本 target 一起编译，
+#             故无需 import SherpaOnnx，改用 HAS_SHERPA 编译标志控制）
+#
+# 生成：xcodegen generate --spec project.asr.yml
+# 编译：xcodebuild -project YiluASR.xcodeproj -scheme Yilu -sdk iphoneos ...
+
+name: YiluASR
 
 options:
   bundleIdPrefix: com.yilu
   deploymentTarget:
     iOS: "15.0"
-  xcodeVersion: "15.0"
   createIntermediateGroups: true
 
 settings:
@@ -14,31 +23,26 @@ settings:
     TARGETED_DEVICE_FAMILY: "1"
     IPHONEOS_DEPLOYMENT_TARGET: "15.0"
 
-packages:
-  # sherpa-onnx 官方 SPM 包，内含 iOS 预编译 xcframework，无需本地编译 C++
-  sherpa-onnx:
-    url: https://github.com/k2-fsa/sherpa-onnx
-    from: "1.12.0"
-
 targets:
   Yilu:
     type: application
     platform: iOS
     sources:
-      # 显式列出源码目录，避免用 excludes 把 Resources 也一起过滤掉
       - path: Yilu/App
       - path: Yilu/ASR
       - path: Yilu/Bridge
       - path: Yilu/Data
       - path: Yilu/Inference
-      # 整目录作为「文件夹引用」加入资源，保留 web/css、web/js 的相对目录结构，
-      # WKWebView 才能按相对路径加载 index.html；medical_terms.txt 也在其中
+      # 官方 Swift 封装（含 SherpaOnnxOfflineRecognizer 等），与 App 同 target 编译
+      - path: Yilu/SherpaOnnx
       - path: Yilu/Resources
         type: folder
         buildPhase: resources
     dependencies:
-      - package: sherpa-onnx
-        product: sherpa-onnx
+      - framework: Vendor/sherpa-onnx.xcframework
+        embed: false
+      - framework: Vendor/onnxruntime.xcframework
+        embed: false
     info:
       path: Yilu/Info.plist
       properties:
@@ -58,10 +62,9 @@ targets:
         ITSAppUsesNonExemptEncryption: false
     settings:
       base:
-        # 显式指定，某些 Xcode 版本下不指定会导致产物名为空（FULL_PRODUCT_NAME = .app）
         PRODUCT_NAME: Yilu
-        PRODUCT_BUNDLE_IDENTIFIER: com.yilu.app
-        # 真机运行：自动管理签名（需在 Xcode → Settings → Accounts 登录 Apple ID）
+        PRODUCT_BUNDLE_IDENTIFIER: com.yilu.asr
         CODE_SIGN_STYLE: Automatic
-        # 模型较大，允许 HTTP 下载但不滥用；生产环境请全部走 HTTPS
+        # 开启真实 ASR 实现（ASRService.swift / SherpaOnnx.swift 里的 HAS_SHERPA 分支）
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: HAS_SHERPA
         OTHER_LDFLAGS: -ObjC
