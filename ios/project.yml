@@ -33,7 +33,16 @@ targets:
       - path: Yilu/Inference
       # 整目录作为「文件夹引用」加入资源，保留 web/css、web/js 的相对目录结构，
       # WKWebView 才能按相对路径加载 index.html；medical_terms.txt 也在其中
-      - path: Yilu/Resources
+      # 资源不能放在名为 Resources 的目录里（iOS codesign 保留名，会报
+      # "code object is not signed at all"）。web/ 用 folder reference 保留目录结构，
+      # medical_terms.txt 平铺到 bundle 根目录，代码加载路径均无需改动。
+      - path: Yilu/Resources/web
+        type: folder
+        buildPhase: resources
+      - path: Yilu/Resources/medical_terms.txt
+        buildPhase: resources
+      - path: Yilu/Resources/selftest.wav
+        buildPhase: resources
         type: folder
         buildPhase: resources
     dependencies:
@@ -63,5 +72,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.yilu.app
         # 真机运行：自动管理签名（需在 Xcode → Settings → Accounts 登录 Apple ID）
         CODE_SIGN_STYLE: Automatic
+        # Andreson Gao 的免费 Personal Team（Xcode 26 从 IDEProvisioningTeamByIdentifier 读取）
+        DEVELOPMENT_TEAM: 9YM4V56MUG
         # 模型较大，允许 HTTP 下载但不滥用；生产环境请全部走 HTTPS
         OTHER_LDFLAGS: -ObjC

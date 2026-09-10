@@ -35,7 +35,16 @@ targets:
       - path: Yilu/Inference
       # 官方 Swift 封装（含 SherpaOnnxOfflineRecognizer 等），与 App 同 target 编译
       - path: Yilu/SherpaOnnx
-      - path: Yilu/Resources
+      # 资源不能放在名为 Resources 的目录里（iOS codesign 保留名，会报
+      # "code object is not signed at all"）。web/ 用 folder reference 保留目录结构，
+      # medical_terms.txt 平铺到 bundle 根目录，代码加载路径均无需改动。
+      - path: Yilu/Resources/web
+        type: folder
+        buildPhase: resources
+      - path: Yilu/Resources/medical_terms.txt
+        buildPhase: resources
+      - path: Yilu/Resources/selftest.wav
+        buildPhase: resources
         type: folder
         buildPhase: resources
     dependencies:
@@ -65,6 +74,8 @@ targets:
         PRODUCT_NAME: Yilu
         PRODUCT_BUNDLE_IDENTIFIER: com.yilu.asr
         CODE_SIGN_STYLE: Automatic
+        # Andreson Gao 的免费 Personal Team（Xcode 26 从 IDEProvisioningTeamByIdentifier 读取）
+        DEVELOPMENT_TEAM: 9YM4V56MUG
         # 开启真实 ASR 实现（ASRService.swift / SherpaOnnx.swift 里的 HAS_SHERPA 分支）
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: HAS_SHERPA
         OTHER_LDFLAGS: -ObjC

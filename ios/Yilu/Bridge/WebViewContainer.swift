@@ -116,6 +116,11 @@ public struct WebViewContainer: UIViewRepresentable {
         public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             // 通知 Web 端：原生环境已就绪
             handler.send?("{\"type\":\"app.ready\",\"ok\":true,\"payload\":{\"platform\":\"ios\"}}")
+            #if DEBUG
+            webView.evaluateJavaScript("document.title + '|' + (window.NativeBridge ? 'bridge-ok' : 'bridge-missing') + '|' + location.href") { result, error in
+                SelfTest.note("0/5 WebView 加载: \(result as? String ?? "?") error=\(error?.localizedDescription ?? "无")")
+            }
+            #endif
         }
     }
 }

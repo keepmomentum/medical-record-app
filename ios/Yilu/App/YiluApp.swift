@@ -97,6 +97,7 @@ final class AppState: ObservableObject {
         let asr = ASRService(modelSpec: ASRModelCatalog.default, numThreads: 2)
         self.asrService = asr
         self.bridgeHandler = BridgeHandler(asr: asr)
+        SelfTest.reset()
     }
 
     func prepareEngineIfNeeded() async {
@@ -108,6 +109,7 @@ final class AppState: ObservableObject {
                 }
             }
             engineState = .ready
+            SelfTest.run(asr: asrService)
         } catch {
             engineState = .failed(error)
         }
