@@ -70,8 +70,14 @@ public final class MedicalTermCorrector: @unchecked Sendable {
     /// - Returns: (纠错后的文本, 是否发生过替换)
     public func correct(_ text: String) -> (String, Bool) {
         guard !text.isEmpty else { return (text, false) }
-        var chars = Array(text)
-        var changed = false
+
+        // 第一层：高置信「整词误识」替换（编辑距离纠正器覆盖不到的短词/同音混淆，
+        // 例如 2 字词「雾化」被识别成「物换」——minLen=3 的滑动窗口永远碰不到它）。
+        let (stage, confChanged) = Self.applyConfusions(text)
+
+        // 第二层：词典 + 编辑距离（长度 >= 3）
+        var chars = Array(stage)
+        var distChanged = false
 
         let minLen = 3
         for length in minLen...8 {
@@ -81,14 +87,35 @@ public final class MedicalTermCorrector: @unchecked Sendable {
                 if let matched = bestMatch(for: candidate) {
                     let replacement = Array(matched)
                     chars.replaceSubrange(index..<(index + length), with: replacement)
-                    changed = true
+                    distChanged = true
                     index += replacement.count
                     continue
                 }
                 index += 1
             }
         }
-        return (String(chars), changed)
+        return (String(chars), confChanged || distChanged)
+    }
+
+    /// 精确子串替换表：人工审核过的高置信纠错对。
+    /// 左侧是 ASR 在儿科就医语境下的常见错误写法，且几乎不可能是正确词，故可放心整词替换。
+    /// 仅做精确匹配，避免误伤正常文本。
+    private static let confusions: [String: String] = [
+        "物换": "雾化",   // 雾化吸入被识别成「物换吸入 / 做物换」
+        "物化": "雾化",   // 同音混淆的另一种常见写法
+    ]
+
+    /// 整词误识替换（第一层纠错）
+    private static func applyConfusions(_ text: String) -> (String, Bool) {
+        var result = text
+        var changed = false
+        for (wrong, right) in confusions {
+            if result.contains(wrong) {
+                result = result.replacingOccurrences(of: wrong, with: right)
+                changed = true
+            }
+        }
+        return (result, changed)
     }
 
     /// 在词典中寻找与候选片段最接近的词（编辑距离 <= 1 才采纳）

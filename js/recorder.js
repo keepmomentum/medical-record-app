@@ -87,7 +87,7 @@ const Recorder = {
       this._cleanup();
       return {
         blob: null,
-        url: null,
+        url: result.audioUrl || null, // 原生返回 yilu-local:// 可播放地址（否则为 null）
         native: true,
         duration: result.duration ? Math.round(result.duration) : duration,
         transcript: (result.text || '').trim(),

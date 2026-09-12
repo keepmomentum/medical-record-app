@@ -32,6 +32,12 @@ public struct WebViewContainer: UIViewRepresentable {
         contentController.add(context.coordinator, name: "yilu")
         config.userContentController = contentController
 
+        // 自定义 scheme：让 Web 层能播放原生落盘的录音 wav（避免 file:// 沙箱与 base64 膨胀）
+        config.setURLSchemeHandler(
+            AudioSchemeHandler(attachmentsDir: Database.attachmentsDirectory),
+            forURLScheme: "yilu-local"
+        )
+
         // 允许通过 file:// 加载本地 js/css
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
 

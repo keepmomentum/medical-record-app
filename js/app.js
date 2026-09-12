@@ -636,12 +636,13 @@ const App = {
         this.renderRecord();
         return;
       }
-      this.state.audioUrl = null;
+      this.state.audioUrl = result.url;
       this.navigate('processing', {
         duration,
         transcript: result.transcript,
         rtf: result.rtf,
         corrected: result.corrected,
+        audioUrl: result.url,
       });
       return;
     }
@@ -702,6 +703,8 @@ const App = {
         // 保留识别原文，方便后续校对（离线规则结构化必然有误差）
         transcript: params.transcript || '',
         source: result.source || 'demo',
+        // 原生录音的可播放地址（yilu-local://），随就诊记录持久化，重进详情也能复听
+        audioUrl: params.audioUrl || '',
       });
 
       this.state.currentVisitId = visit.id;
@@ -1620,10 +1623,11 @@ const App = {
   // Audio playback
   audioElement: null,
   togglePlayAudio() {
-    if (!this.state.audioUrl && !this.state.currentVisitId) return;
-
     const visit = Store.getVisit(this.state.currentVisitId);
-    if (!visit || !this.state.audioUrl) {
+    const audioUrl = (visit && visit.audioUrl) || this.state.audioUrl;
+    if (!audioUrl && !this.state.currentVisitId) return;
+
+    if (!visit || !audioUrl) {
       this.toast('录音文件不可用');
       return;
     }
@@ -1637,7 +1641,7 @@ const App = {
       return;
     }
 
-    this.audioElement = new Audio(this.state.audioUrl);
+    this.audioElement = new Audio(audioUrl);
     const playBtn = document.getElementById('play-btn');
     const barFill = document.getElementById('audio-bar-fill');
 

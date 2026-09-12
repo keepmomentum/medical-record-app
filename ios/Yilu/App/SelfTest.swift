@@ -91,8 +91,9 @@ enum SelfTest {
             }
 
             // 4. 术语纠错器
-            let (fixed, _) = MedicalTermCorrector.shared.correct("头胞克肟")
-            log("4/5 术语纠错: \(MedicalTermCorrector.shared.termCount > 0 ? "✅" : "❌") 词表 \(MedicalTermCorrector.shared.termCount) 条（头胞克肟 -> \(fixed)）")
+            let (fixed1, _) = MedicalTermCorrector.shared.correct("头胞克肟")
+            let (fixed2, _) = MedicalTermCorrector.shared.correct("给孩子做物换吸入")
+            log("4/5 术语纠错: \(MedicalTermCorrector.shared.termCount > 0 ? "✅" : "❌") 词表 \(MedicalTermCorrector.shared.termCount) 条（头胞克肟 -> \(fixed1) / 物换 -> \(fixed2)）")
 
             // 5. SQLite 读写
             do {

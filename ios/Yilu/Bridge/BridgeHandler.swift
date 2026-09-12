@@ -149,6 +149,8 @@ public final class BridgeHandler: NSObject, @unchecked Sendable {
                     "rtf": result.rtf,
                     "corrected": result.corrected,
                     "audioPath": fileURL.path,
+                    // 供 Web 层 <audio> 播放：yilu-local:// 由 AudioSchemeHandler 读取附件目录
+                    "audioUrl": "yilu-local://\(fileURL.lastPathComponent)",
                 ]
                 emit(.success(BridgeMethod.asrStop.rawValue, requestId, payload.mapValues { AnyCodable($0) }))
             } catch {
