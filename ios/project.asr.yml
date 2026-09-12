@@ -45,8 +45,6 @@ targets:
         buildPhase: resources
       - path: Yilu/Resources/selftest.wav
         buildPhase: resources
-        type: folder
-        buildPhase: resources
     dependencies:
       - framework: Vendor/sherpa-onnx.xcframework
         embed: false
@@ -77,5 +75,7 @@ targets:
         # Andreson Gao 的免费 Personal Team（Xcode 26 从 IDEProvisioningTeamByIdentifier 读取）
         DEVELOPMENT_TEAM: 9YM4V56MUG
         # 开启真实 ASR 实现（ASRService.swift / SherpaOnnx.swift 里的 HAS_SHERPA 分支）
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: HAS_SHERPA
+        # 注意：显式设置会覆盖默认的 Debug 标志，必须把 DEBUG 一起加上，否则
+        # 所有 #if DEBUG 分支（含 SelfTest 自检）会被编译器裁剪掉
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: HAS_SHERPA DEBUG
         OTHER_LDFLAGS: -ObjC
